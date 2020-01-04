@@ -391,9 +391,13 @@ void TestHarness::enumerateAll()
 	Quackle::Bag B;
 	Enumerator E(B);
 	ProbableRackList racks;
-	E.enumerate(&racks);
-	for (ProbableRackList::iterator it = racks.begin(); it != racks.end(); ++it)
+	// alkamid's mod: enumerate racks from 2 to 7 letters
+	for (uint num_letters = 2; num_letters <= 7; num_letters++) {
+	    E.enumerate(&racks, num_letters);
+	    UVcout << num_letters << " letter racks" << endl;
+	    for (ProbableRackList::iterator it = racks.begin(); it != racks.end(); ++it)
 		UVcout << (*it).rack << " " << (*it).probability << endl;
+	}
 }
 
 struct PowerRack
@@ -682,7 +686,7 @@ void TestHarness::selfPlayGame(unsigned int gameNumber, bool reports, bool playa
 
 	game.addPosition();
 
-	UVcout << "NEW GAME (#" << gameNumber << ")" << endl;
+	//UVcout << "NEW GAME (#" << gameNumber << ")" << endl;
 
 	QTime time;
 	time.start();
@@ -699,7 +703,7 @@ void TestHarness::selfPlayGame(unsigned int gameNumber, bool reports, bool playa
 				const PlayerList players = pos.endgameAdjustedScores();
 				for (PlayerList::const_iterator it = players.begin();
 					it != players.end(); ++it) {
-					UVcout << it->name() << " : " << it->score() << " ";
+					//UVcout << it->name() << " : " << it->score() << " ";
 				}
 				UVcout << endl;
 			}
@@ -712,24 +716,105 @@ void TestHarness::selfPlayGame(unsigned int gameNumber, bool reports, bool playa
             if (playability) {
                 game.currentPosition().kibitz(100);
                 Quackle::MoveList moves = game.currentPosition().moves();
-                float bestEquity = moves.front().equity - 0.0001f;
-                Quackle::MoveList tops;
-                for (MoveList::iterator it = moves.begin(); it != moves.end(); ++it) {
-                    if ((*it).equity >= bestEquity) {
-                        tops.push_back(*it);
-                    }
-                }
-                int numTops = tops.size();
-                for (MoveList::iterator it = tops.begin(); it != tops.end(); ++it) {
-                    MoveList words = game.currentPosition().allWordsFormedBy(*it);
-                    for (MoveList::iterator it2 = words.begin(); it2 != words.end(); ++it2) {
-                        Rack word = (*it2).prettyTiles();
-                        UVcout << word << " " << numTops << endl;
-                    }
-                }
-                int toPlay = rand() % numTops;
-                //UVcout << "playing move #" << toPlay << endl;
-                game.commitMove(tops[toPlay]);
+		
+	        // alkamid's mod: output the best move and the difference between it and the next best that uses different letters (for calculating playability)
+		//TODO: exchange moves get written even if they shouldn't
+
+		// store tiles used in the top move
+		//Rack used = moves.front().usedTiles();
+		Rack tempUsed;
+		double diff = 0.0;
+		std::vector<Quackle::LetterString> bestMoves;
+		std::vector<Quackle::LetterString> hooks;
+
+		// only consider non-exchange moves (we're not interested what are the best racks to exchange)
+		if (moves.front().action != Move::Exchange) {
+
+		    // start from the top of the best moves list 
+		    for (MoveList::iterator it = moves.begin(); it != moves.end(); ++it) {
+
+			
+			// is there a difference in equity between this move and the top move?
+			diff = moves.front().equity - (*it).equity;
+
+			// used for checking if move is already in bestMoves
+			int found = 0;
+			int found_hook = 0;
+			int add_hooks = 1;
+
+			// if not:
+			if (diff == 0) {
+
+			    // if move is an exchange, write out whatever moves we have so far and don't look further down the list of moves 
+			    if ((*it).action == Move::Exchange) {
+				break;
+			    }
+
+			    // if the difference in equity is 0 and this move doesn't exist in bestMoves, add it
+			    for (uint j =0; j< bestMoves.size(); j++) {
+						    
+				if (bestMoves[j] == (*it).wordTiles()) {
+				    found = 1;
+				    break;
+				}
+			    }
+			    if (found == 0) {
+				if (i != 0) {
+				    add_hooks = 1;
+				}
+				
+				bestMoves.push_back((*it).wordTiles());
+			    }
+			}
+
+			// when diff != 0, we are only interested if the next word is one that we already saved but in a different position
+			// if so, we'll go further down the list of moves
+			else {
+  
+			    for (uint j =0; j< bestMoves.size(); j++) {
+				if (bestMoves[j] == (*it).wordTiles()) {
+				    found = 1;
+				    add_hooks = 1;
+				    break;
+				}
+			    }
+			    		    
+			    if (found == 0) {
+				break;
+			    }
+			}
+			// adding hooks, for analysing hook playability. All hooked words are preceded by # in the output file
+			if (add_hooks == 1) {
+			    MoveList allwords = game.currentPosition().board().allWordsFormedBy((*it));
+								
+			    for (uint k = 1; k < allwords.size(); k++) {
+				found_hook = 0;
+				for (uint l = 0; l < hooks.size(); l++) {
+				    
+				    if (allwords[k].prettyTiles() == hooks[l]) {
+					found_hook = 1;
+					break;
+				    }
+				}
+				if (found_hook == 0) {
+				    hooks.push_back(allwords[k].prettyTiles());
+				}
+			    }
+			}
+			
+		    }
+		    for (uint j = 0; j < hooks.size(); j++) {
+			UVcout << '#' << QUACKLE_ALPHABET_PARAMETERS->userVisible(hooks[j]) << ' ' << diff/bestMoves.size() << endl;
+		    }
+		    for (uint j = 0; j < bestMoves.size(); j++) {
+			    
+			UVcout << QUACKLE_ALPHABET_PARAMETERS->userVisible(bestMoves[j]) << " " << diff/bestMoves.size() << endl;
+		    }
+	      
+		}
+		// end: alkamid's mod
+                
+                game.commitMove(moves.front());
             } else {
                 Quackle::Move compMove(game.haveComputerPlay());
                 UVcout << "with " << player.rack() << ", " << player.name()
@@ -740,8 +825,8 @@ void TestHarness::selfPlayGame(unsigned int gameNumber, bool reports, bool playa
 
 	int secondsElapsed = static_cast<int>(time.elapsed() / 1000);
 	if (!m_quiet) {
-		UVcout << "Game " << gameNumber << " played in " << secondsElapsed
-	           << " seconds with " << i << " moves" << endl;
+		//UVcout << "Game " << gameNumber << " played in " << secondsElapsed
+	        //   << " seconds with " << i << " moves" << endl;
 	}
 
 	if (!reports) {
